@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<body>
+  <style>
+    .node:hover {
+      cursor: pointer;
+    }
+
+    .node circle {
+      stroke: #000;
+      stroke-width: .75px;
+    }
+
+    .node text {
+      pointer-events: none;
+      font: 11px sans-serif;
+    }
+
+    .link {
+      stroke: #000;
+      stroke-width: 1px;
+      stroke-opacity: .5;
+    }
+
+    /* for tooltip */
+    .d3-tip {
+      font: 11px sans-serif;
+      line-height: 1;
+      padding: 12px;
+      background: rgba(0, 0, 0, 0.75);
+      color: #fff;
+    }
+
+    /* Creates a small triangle extender for the tooltip */
+    .d3-tip:after {
+      box-sizing: border-box;
+      display: inline;
+      font-size: 11px;
+      width: 100%;
+      line-height: 1;
+      color: rgba(0, 0, 0, 0.75);
+      content: "\25BC";
+      position: absolute;
+      text-align: center;
+    }
+
+    /* Style northward tooltips differently */
+    .d3-tip.n:after {
+      margin: -1px 0 0 0;
+      top: 100%;
+      left: 0;
+    }
+  </style> 
+
+  <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.5/d3.min.js"></script> -->
+  <!-- <script type='text/javascript' src="http://labratrevenge.com/d3-tip/javascripts/d3.tip.v0.6.3.js"> </script> -->
+  <script src="./lib/d3.min.js"></script>
+  <script src="./lib/d3-tip.js"></script>
+  <script>
+    var width = 960,  //960x720, 640x480, or 528x528
+        height = 720;
+
+    var dataset = [];
+    var links = [];
+    var linkedByIndex = {};
+    d3.csv("./data/MyFBFriendsDataSet.csv", function(d) {
+        var friendList = d.friendList.split("/");
+        var sourceIndex = +d.id - 1;
+        linkedByIndex[sourceIndex + "," + sourceIndex] = 1; //-- linked to itself
+        if (+d.numMutualFriends > 0) {
+          friendList.forEach(function(d, i){ 
+            var targetIndex = friendList[i] - 1;
+            links.push({"source": sourceIndex, "target": targetIndex});
+            linkedByIndex[sourceIndex + "," + targetIndex] = 1;
+          }); //forEach
+        }
+        return {
+          firstName: d.firstName.split("/")[0],
+          lastName: d.lastName,
+          name: d.firstName.split("/")[0] + " " + d.lastName,
+          sex: d.sex,
+          numFriends: +d.numFriends,
+          numMutual: +d.numMutualFriends,
+          friendList: friendList,
+          id: d.id
+        };
+      }, function(error, rows) {
+        dataset = rows;
+        createNodeWithDataSet();
+    });
+
+    function createNodeWithDataSet() {
+      var toggle = 0;
+      var selectedNode;
+      var nodes = dataset,
+      // root = nodes[0],
+      // root.fixed = true,
+      rScale = d3.scale.linear().clamp(true)
+                        .domain([10, 500])
+                        .range([10, 30]);
+
+      var force = d3.layout.force()
+          .gravity(.15)
+          .charge(-75)
+          .size([width, height])
+          .nodes(nodes);
+
+      force.start();
+
+      //-- create svg element
+      var svg = d3.select("body").append("svg")
+          .attr("width", width)
+          .attr("height", height);
+
+      //-- Initialize tooltip
+      var tip = d3.tip()
+          .attr('class', 'd3-tip')
+          .offset([-10, 0])
+          .html(function(d) { 
+            return d.name + ", " + d.numMutual + " mutual friends</span>";
+          });
+
+          svg.call(tip)
+
+      //-- create nodeGroup w. circle & text
+      var nodeGroup = svg.selectAll(".node")
+          .data(nodes)
+          .enter()
+          .append("g")
+          .attr("class", "node")
+          .on('mouseover', tip.show)
+          .on("mouseover", function(d) {
+            if (this != selectedNode && toggle == 0) {
+              d3.select(this).selectAll('circle').style("fill", "#ffcc00");
+              d3.select(this).selectAll('text.num')
+                .style("fill", "black")
+                .text(function(d) {
+                  return d.numFriends;
+                });
+              tip.show(d);
+            }
+            if (this == selectedNode) tip.show(d);
+          })
+          .on('mouseout', function(d) {
+            if (this != selectedNode && toggle == 0) {
+              d3.select(this).selectAll('circle').style("fill", function(d, i) { 
+                return (d.sex == "f") ? "white":"black"; });
+              d3.select(this).selectAll('text.num')
+                .style("fill", function(d, i) { 
+                  return (d.sex == "f") ? "black":"white"; })
+                .text(function(d) {
+                  var num = d.numFriends;
+                  if (d.numFriends > 500) {
+                    if (d.numFriends > 2000) {
+                      num = "2000+";
+                    } else if (d.numFriends > 1000) {
+                      num = "1000+";
+                    } else {
+                      num = "500+";
+                    }
+                  }
+                  return num;
+                })
+              tip.hide(d);
+            } 
+            if (this == selectedNode) tip.hide(d);
+          })
+          .on("click", onNodeClick)
+          .call(force.drag);
+
+      //-- circle
+      nodeGroup.append("circle")
+          .attr("r", function(d) {
+            d.radius = rScale(d.numFriends);
+            if (d.numFriends > 1000) {
+              d.radius = (d.numFriends > 2000)? 50:40;
+            }
+            return (d.radius);
+          })
+          .style("fill", function(d, i) { 
+            return (d.sex == "f") ? "white":"black"; 
+          });
+          
+      //-- text
+      nodeGroup.append("text")
+            .attr("dy", ".35em")
+            .attr("text-anchor", "middle")
+            .attr("class", "num")
+            .attr("fill", function(d, i) { return (d.sex == "f") ? "black":"white"; })
+            .text(function(d) {
+              var num = d.numFriends;
+              if (d.numFriends > 500) {
+                if (d.numFriends > 2000) {
+                  num = "2000+";
+                } else if (d.numFriends > 1000) {
+                  num = "1000+";
+                } else {
+                  num = "500+";
+                };
+              }
+              return num;
+            });
+
+      nodeGroup.append("text")
+            .attr("text-anchor", "middle")
+            .attr("dy", function(d) { return (d.radius + 11); })
+            .attr("class", "label")
+            .attr("fill", "black")
+            .attr("visibility", "hidden")
+            .text(function(d) {
+              return d.name;
+            });
+
+      function onNodeClick() {
+        if (toggle == 0) {
+          //-- Reduce the opacity of all but the neighbouring nodes
+          d = d3.select(this).node().__data__;  //**********//
+          nodeGroup.style("opacity", function (o) {
+            return neighboring(d, o) | neighboring(o, d) ? 1 : 0.1;
+          });
+          toggle = 1;
+          selectedNode = this;
+          nodeGroup.selectAll("text.label").style("visibility", function (o) {
+            return neighboring(d, o) | neighboring(o, d) ? "visible" : "hidden";
+          });
+
+        } else {
+          if (this == selectedNode) {
+            //-- Put them back to opacity=1
+            nodeGroup.style("opacity", 1);
+            toggle = 0;
+            //--------------------//
+            d3.select(selectedNode).selectAll('circle').style("fill", function(d, i) { 
+              return (d.sex == "f") ? "white":"black"; });
+            d3.select(selectedNode).selectAll('text.num')
+              .style("fill", function(d, i) { 
+                return (d.sex == "f") ? "black":"white"; })
+              .text(function(d) {
+                var num = d.numFriends;
+                if (d.numFriends > 500) {
+                  if (d.numFriends > 2000) {
+                    num = "2000+";
+                  } else if (d.numFriends > 1000) {
+                    num = "1000+";
+                  } else {
+                    num = "500+";
+                  }
+                }
+                return num;
+              })
+            nodeGroup.selectAll("text.label").style("visibility","hidden")
+            tip.hide(d);
+            //--------------------//
+            selectedNode = null;
+          }
+        } //else
+      }//-- nodeClick
+
+      force.on("tick", function() {
+        var q = d3.geom.quadtree(nodes),
+            i = 0,
+            n = nodes.length;
+
+        while (++i < n) q.visit(collide(nodes[i]));
+
+        nodeGroup.attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; });
+      });
+    }
+
+    // ------ function collide ---------- //
+    function collide(node) {
+      // var r = node.radius + 16,
+      var r = node.radius + 45,
+          nx1 = node.x - r,
+          nx2 = node.x + r,
+          ny1 = node.y - r,
+          ny2 = node.y + r;
+      return function(quad, x1, y1, x2, y2) {
+        if (quad.point && (quad.point !== node)) {
+          var x = node.x - quad.point.x,
+              y = node.y - quad.point.y,
+              l = Math.sqrt(x * x + y * y),
+              r = node.radius + quad.point.radius;
+          if (l < r) {
+            l = (l - r) / l * .5;
+            node.x -= x *= l;
+            node.y -= y *= l;
+            quad.point.x += x;
+            quad.point.y += y;
+          }
+        }
+        return x1 > nx2 || x2 < nx1 || y1 > ny2 || y2 < ny1;
+      };
+    } // ---- END collide -------------- //
+    
+
+    // ------ function neighboring ----- //
+    function neighboring(a, b) {
+      return linkedByIndex[a.index + "," + b.index];
+    } // ---- END neighboring ---------- //
+  </script>
+</body>
